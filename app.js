@@ -524,16 +524,6 @@ function statementPeriod(desde, hasta, jobs) {
   return fmtDate(min) + " al " + fmtDate(max) + " (pendientes)";
 }
 
-function groupJobsByDate(jobs) {
-  const groups = [];
-  for (const j of jobs) {
-    const last = groups[groups.length - 1];
-    if (last && last.fecha === j.fecha) last.jobs.push(j);
-    else groups.push({ fecha: j.fecha, jobs: [j] });
-  }
-  return groups;
-}
-
 function pdfSafe(s) {
   return String(s)
     .replace(/−/g, "-")
@@ -619,28 +609,14 @@ function buildStatementPdf(st, opts) {
   doc.text(periodLines, margin + 95, y);
 
   y += 10;
-  const groups = groupJobsByDate(jobs);
-  const showSub = groups.length > 1;
-  const body = [];
-  for (const g of groups) {
-    for (const j of g.jobs) {
-      body.push([
-        fmtDate(j.fecha),
-        pdfSafe(j.descripcion || "-"),
-        pdfSafe(matName(st.materials, j.materialId) + (j.materialCliente ? " (cliente)" : "")),
-        pdfSafe(fmtMedidas(j)),
-        fmtCLP(j.precioM2),
-        fmtCLP(j.total),
-      ]);
-    }
-    if (showSub) {
-      const sub = g.jobs.reduce((sum, j) => sum + j.total, 0);
-      body.push([
-        { content: "Subtotal " + fmtDate(g.fecha), colSpan: 5, styles: { fontStyle: "bold", halign: "right", textColor: muted, fillColor: [250, 251, 252] } },
-        { content: fmtCLP(sub), styles: { fontStyle: "bold", halign: "right", textColor: navy, fillColor: [250, 251, 252] } },
-      ]);
-    }
-  }
+  const body = jobs.map((j) => [
+    fmtDate(j.fecha),
+    pdfSafe(j.descripcion || "-"),
+    pdfSafe(matName(st.materials, j.materialId) + (j.materialCliente ? " (cliente)" : "")),
+    pdfSafe(fmtMedidas(j)),
+    fmtCLP(j.precioM2),
+    fmtCLP(j.total),
+  ]);
 
   if (jobs.length && typeof doc.autoTable === "function") {
     doc.autoTable({
@@ -756,24 +732,16 @@ function statementHtml(st, opts) {
   const total = jobs.reduce((s, j) => s + j.total, 0);
   const period = statementPeriod(opts.desde, opts.hasta, jobs);
   const emitido = opts.emitido || todayISO();
-  const groups = groupJobsByDate(jobs);
-  const showSub = groups.length > 1;
   let rows = "";
-  for (const g of groups) {
-    for (const j of g.jobs) {
-      rows += "<tr>" +
-        "<td>" + esc(fmtDate(j.fecha)) + "</td>" +
-        "<td>" + esc(j.descripcion || "—") + "</td>" +
-        "<td>" + esc(matName(st.materials, j.materialId) + (j.materialCliente ? " (cliente)" : "")) + "</td>" +
-        "<td>" + esc(fmtMedidas(j)) + "</td>" +
-        '<td class="vs-num">' + esc(fmtCLP(j.precioM2)) + "</td>" +
-        '<td class="vs-num">' + esc(fmtCLP(j.total)) + "</td>" +
-        "</tr>";
-    }
-    if (showSub) {
-      const sub = g.jobs.reduce((sum, j) => sum + j.total, 0);
-      rows += '<tr class="vs-st-sub"><td colspan="5">Subtotal ' + esc(fmtDate(g.fecha)) + '</td><td class="vs-num">' + esc(fmtCLP(sub)) + "</td></tr>";
-    }
+  for (const j of jobs) {
+    rows += "<tr>" +
+      "<td>" + esc(fmtDate(j.fecha)) + "</td>" +
+      "<td>" + esc(j.descripcion || "—") + "</td>" +
+      "<td>" + esc(matName(st.materials, j.materialId) + (j.materialCliente ? " (cliente)" : "")) + "</td>" +
+      "<td>" + esc(fmtMedidas(j)) + "</td>" +
+      '<td class="vs-num">' + esc(fmtCLP(j.precioM2)) + "</td>" +
+      '<td class="vs-num">' + esc(fmtCLP(j.total)) + "</td>" +
+      "</tr>";
   }
   const pago = String(opts.datosPago || "").trim();
   const pagoBlock = pago

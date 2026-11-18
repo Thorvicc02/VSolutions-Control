@@ -1,4 +1,4 @@
-const CACHE = "vsolutions-control-v2";
+const CACHE = "vsolutions-control-v3";
 const ASSETS = [
   "./",
   "./index.html",
