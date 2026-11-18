@@ -15,6 +15,7 @@ App para registrar impresiones, inventario de rollos y saldos por cliente. Pensa
 
 - En **Nueva impresión** anotas fecha, cliente, material, medidas o m² y el total.
 - El inventario descuenta metros del rollo que corresponde. El adhesivo laminado descuenta adhesivo glossy y adhesivo transparente matte. Si el material es del cliente, no se descuenta nada.
+- En **Cobros** armas el estado de cuenta de un cliente, lo descargas en PDF o imagen, o lo compartes por WhatsApp o Mail. En esa misma pestaña puedes anotar los datos de pago (banco, cuenta, RUT, email) que aparecen al pie del documento; se guardan solo en este dispositivo.
 - En **Inicio** puedes **Exportar JSON** (respaldo), **Exportar CSV** (listado de trabajos) e **Importar JSON** (reemplaza los datos de este dispositivo).
 
 Haz un respaldo JSON de vez en cuando. Si reinstalas la app o cambias de dispositivo, importa ese archivo para recuperar todo.

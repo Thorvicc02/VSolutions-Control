@@ -1,4 +1,4 @@
-const CACHE = "vsolutions-control-v1";
+const CACHE = "vsolutions-control-v2";
 const ASSETS = [
   "./",
   "./index.html",
@@ -12,7 +12,10 @@ const ASSETS = [
   "./icons/icon-512-maskable.png",
   "./icons/apple-touch-icon.png",
   "./apple-touch-icon.png",
-  "./favicon.ico"
+  "./favicon.ico",
+  "./vendor/html2canvas.min.js",
+  "./vendor/jspdf.umd.min.js",
+  "./vendor/jspdf.plugin.autotable.min.js"
 ];
 
 self.addEventListener("install", (e) => {

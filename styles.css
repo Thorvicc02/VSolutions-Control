@@ -632,3 +632,187 @@ html, body {
 @media (display-mode: standalone) {
   html, body, .vs-app { min-height: 100dvh; height: 100dvh; }
 }
+
+.vs-statement-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 0 10px;
+}
+.vs-statement {
+  width: 794px;
+  min-width: 794px;
+  margin: 0 auto;
+  background: #ffffff;
+  color: #172033;
+  border: 1px solid var(--vs-border);
+  border-radius: 8px;
+  box-shadow: var(--vs-shadow);
+  padding: 36px 40px 32px;
+  box-sizing: border-box;
+}
+.vs-st-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--vs-border);
+  margin-bottom: 22px;
+}
+.vs-st-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.vs-st-brand strong {
+  display: block;
+  font-size: 18px;
+  letter-spacing: -.03em;
+  font-weight: 700;
+}
+.vs-st-brand small {
+  display: block;
+  margin-top: 2px;
+  color: var(--vs-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.vs-st-meta {
+  display: grid;
+  gap: 3px;
+  text-align: right;
+  color: var(--vs-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.vs-st-meta strong {
+  color: var(--vs-text);
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.vs-st-kicker {
+  margin: 0 0 4px;
+  color: var(--vs-primary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.vs-statement h2 {
+  margin: 0 0 18px;
+  font-size: 24px;
+  letter-spacing: -.03em;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.vs-st-info {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 24px;
+  margin-bottom: 22px;
+}
+.vs-st-info div { display: grid; gap: 3px; }
+.vs-st-info span {
+  color: var(--vs-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.vs-st-info strong { font-size: 15px; font-weight: 700; }
+.vs-st-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.vs-st-table th, .vs-st-table td {
+  padding: 9px 8px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--vs-border);
+}
+.vs-st-table th {
+  color: var(--vs-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  background: #f5f6f8;
+  border-bottom: 1px solid #dce1e8;
+  white-space: nowrap;
+}
+.vs-st-table .vs-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vs-st-table th:nth-child(1),
+.vs-st-table td:nth-child(1),
+.vs-st-table th:nth-child(4),
+.vs-st-table td:nth-child(4) { white-space: nowrap; }
+.vs-st-sub td {
+  background: #fafbfc;
+  color: var(--vs-muted);
+  font-weight: 700;
+  font-size: 12px;
+}
+.vs-st-sub .vs-num { color: var(--vs-text); }
+.vs-st-table tfoot th {
+  background: #eff6ff;
+  color: var(--vs-navy);
+  font-size: 13px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  border-bottom: 0;
+  padding: 12px 8px;
+}
+.vs-st-table tfoot .vs-num {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.vs-st-empty {
+  margin: 0;
+  padding: 24px;
+  text-align: center;
+  color: var(--vs-muted);
+  background: var(--vs-soft);
+  border: 1px dashed #cbd3de;
+  border-radius: 10px;
+}
+.vs-st-pago {
+  margin-top: 28px;
+  padding: 14px 16px;
+  border: 1px solid var(--vs-border);
+  border-radius: 10px;
+  background: #fafbfc;
+}
+.vs-st-pago-label {
+  margin: 0 0 6px;
+  color: var(--vs-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.vs-st-pago-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.vs-st-thanks {
+  margin: 28px 0 0;
+  color: var(--vs-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+.vs-cobro-hint {
+  margin: 14px 0 0;
+  color: var(--vs-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 760px) {
+  .vs-tabbar button { font-size: 9px; padding: 4px 1px; }
+}

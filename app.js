@@ -26,9 +26,12 @@ const NAV = [
   { id: "inicio", label: "Inicio", short: "Inicio" },
   { id: "nueva", label: "Nueva impresión", short: "Nueva" },
   { id: "trabajos", label: "Trabajos", short: "Trabajos" },
+  { id: "cobros", label: "Cobros", short: "Cobros" },
   { id: "inventario", label: "Inventario", short: "Inventario" },
   { id: "ganancia", label: "Ganancia", short: "Ganancia" },
 ];
+
+const PAGO_KEY = "vsol-datos-pago-v1";
 
 const MESES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -441,6 +444,7 @@ function tabTitle(tab, editId) {
   if (tab === "inicio") return "Inicio";
   if (tab === "nueva") return editId ? "Editar impresión" : "Nueva impresión";
   if (tab === "trabajos") return "Trabajos";
+  if (tab === "cobros") return "Cobros";
   if (tab === "inventario") return "Inventario";
   return "Ganancia";
 }
@@ -460,6 +464,9 @@ function iconSvg(name, size) {
   if (name === "inventario") {
     return "<svg " + p + "><path d=\"M4 7.5 12 4l8 3.5-8 3.5L4 7.5Z\" /><path d=\"M4 12l8 3.5L20 12\" /><path d=\"M4 16.5 12 20l8-3.5\" /></svg>";
   }
+  if (name === "cobros") {
+    return "<svg " + p + "><path d=\"M7 3.5h10a1.2 1.2 0 0 1 1.2 1.2V20l-3.1-1.4L12 20l-3.1-1.4L5.8 20V4.7A1.2 1.2 0 0 1 7 3.5Z\" /><path d=\"M9 8.5h6M9 12h6M9 15.5h3.5\" /></svg>";
+  }
   return "<svg " + p + "><path d=\"M4 16.5 9.5 11l3.5 3.5L20 7.5\" /><path d=\"M14 7.5h6v6\" /></svg>";
 }
 
@@ -471,9 +478,333 @@ function esc(s) {
     .replace(/"/g, "&quot;");
 }
 
+function fmtQty(n) {
+  if (!isNum(n)) return String(n);
+  const s = String(Math.round(n * 1000) / 1000);
+  return s.replace(".", ",");
+}
+
+function fmtMedidas(j) {
+  if (isNum(j.anchoCm) && isNum(j.altoCm) && j.anchoCm > 0 && j.altoCm > 0) {
+    let s = fmtQty(j.anchoCm) + " × " + fmtQty(j.altoCm) + " cm";
+    if (isNum(j.cantidad) && j.cantidad !== 1) s += " × " + fmtQty(j.cantidad);
+    s += " (" + fmtM2(j.m2) + ")";
+    return s;
+  }
+  return fmtM2(j.m2);
+}
+
+function cobroFileBase(cliente, iso) {
+  const raw = String(cliente || "Cliente")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return "Cobro_" + (raw || "Cliente") + "_" + (iso || todayISO());
+}
+
+function statementJobs(st, cliente, desde, hasta) {
+  return st.jobs
+    .filter((j) => j.cliente === cliente && !j.pagado)
+    .filter((j) => !desde || j.fecha >= desde)
+    .filter((j) => !hasta || j.fecha <= hasta)
+    .slice()
+    .sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id.localeCompare(b.id));
+}
+
+function statementPeriod(desde, hasta, jobs) {
+  if (desde && hasta) return fmtDate(desde) + " al " + fmtDate(hasta);
+  if (desde) return "Desde " + fmtDate(desde);
+  if (hasta) return "Hasta " + fmtDate(hasta);
+  if (!jobs || !jobs.length) return "Todos los pendientes";
+  const dates = jobs.map((j) => j.fecha);
+  const min = dates.reduce((a, b) => (a < b ? a : b));
+  const max = dates.reduce((a, b) => (a > b ? a : b));
+  if (min === max) return fmtDate(min) + " (pendientes)";
+  return fmtDate(min) + " al " + fmtDate(max) + " (pendientes)";
+}
+
+function groupJobsByDate(jobs) {
+  const groups = [];
+  for (const j of jobs) {
+    const last = groups[groups.length - 1];
+    if (last && last.fecha === j.fecha) last.jobs.push(j);
+    else groups.push({ fecha: j.fecha, jobs: [j] });
+  }
+  return groups;
+}
+
+function pdfSafe(s) {
+  return String(s)
+    .replace(/−/g, "-")
+    .replace(/[–—]/g, "-")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'");
+}
+
+function getJsPDF() {
+  const root = typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : null);
+  if (root && root.jspdf && root.jspdf.jsPDF) return root.jspdf.jsPDF;
+  return null;
+}
+
+function buildStatementPdf(st, opts) {
+  const JsPDF = getJsPDF();
+  if (!JsPDF) throw new Error("jsPDF no esta disponible");
+  const cliente = opts.cliente || "";
+  const jobs = statementJobs(st, cliente, opts.desde, opts.hasta);
+  const total = jobs.reduce((s, j) => s + j.total, 0);
+  const period = statementPeriod(opts.desde, opts.hasta, jobs);
+  const emitido = opts.emitido || todayISO();
+  const datosPago = String(opts.datosPago || "").trim();
+  const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 16;
+  const navy = [15, 23, 42];
+  const muted = [105, 115, 134];
+  const line = [227, 231, 237];
+  const soft = [239, 246, 255];
+  const primary = [37, 99, 235];
+
+  let y = 16;
+  doc.setFillColor(navy[0], navy[1], navy[2]);
+  doc.roundedRect(margin, y, 10, 10, 1.5, 1.5, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7);
+  doc.text("VS", margin + 5, y + 6.5, { align: "center" });
+  doc.setTextColor(navy[0], navy[1], navy[2]);
+  doc.setFontSize(14);
+  doc.text("VSolutions", margin + 13, y + 4.6);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(muted[0], muted[1], muted[2]);
+  doc.text("Control de impresiones", margin + 13, y + 9.2);
+  doc.setFontSize(8);
+  doc.text("Emisión", pageW - margin, y + 3.6, { align: "right" });
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(navy[0], navy[1], navy[2]);
+  doc.text(fmtDate(emitido), pageW - margin, y + 9.2, { align: "right" });
+
+  y = 33;
+  doc.setDrawColor(line[0], line[1], line[2]);
+  doc.setLineWidth(0.35);
+  doc.line(margin, y, pageW - margin, y);
+
+  y = 41;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(primary[0], primary[1], primary[2]);
+  doc.text("ESTADO DE CUENTA", margin, y);
+  y += 8;
+  doc.setFontSize(16);
+  doc.setTextColor(navy[0], navy[1], navy[2]);
+  doc.text("Detalle de impresiones pendientes", margin, y);
+
+  y += 10;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(muted[0], muted[1], muted[2]);
+  doc.text("Cliente", margin, y);
+  doc.text("Período", margin + 95, y);
+  y += 5.5;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(navy[0], navy[1], navy[2]);
+  doc.text(pdfSafe(cliente), margin, y);
+  const periodLines = doc.splitTextToSize(pdfSafe(period), pageW - margin - 95);
+  doc.setFontSize(11);
+  doc.text(periodLines, margin + 95, y);
+
+  y += 10;
+  const groups = groupJobsByDate(jobs);
+  const showSub = groups.length > 1;
+  const body = [];
+  for (const g of groups) {
+    for (const j of g.jobs) {
+      body.push([
+        fmtDate(j.fecha),
+        pdfSafe(j.descripcion || "-"),
+        pdfSafe(matName(st.materials, j.materialId) + (j.materialCliente ? " (cliente)" : "")),
+        pdfSafe(fmtMedidas(j)),
+        fmtCLP(j.precioM2),
+        fmtCLP(j.total),
+      ]);
+    }
+    if (showSub) {
+      const sub = g.jobs.reduce((sum, j) => sum + j.total, 0);
+      body.push([
+        { content: "Subtotal " + fmtDate(g.fecha), colSpan: 5, styles: { fontStyle: "bold", halign: "right", textColor: muted, fillColor: [250, 251, 252] } },
+        { content: fmtCLP(sub), styles: { fontStyle: "bold", halign: "right", textColor: navy, fillColor: [250, 251, 252] } },
+      ]);
+    }
+  }
+
+  if (jobs.length && typeof doc.autoTable === "function") {
+    doc.autoTable({
+      startY: y,
+      margin: { left: margin, right: margin, bottom: 18 },
+      head: [["Fecha", "Descripción", "Material", "Medidas / m²", "Precio m²", "Valor"]],
+      body: body,
+      foot: [[{ content: "TOTAL PENDIENTE", colSpan: 5, styles: { halign: "right", fontStyle: "bold" } }, { content: fmtCLP(total), styles: { halign: "right", fontStyle: "bold" } }]],
+      showFoot: "lastPage",
+      theme: "plain",
+      styles: {
+        font: "helvetica",
+        fontSize: 8,
+        cellPadding: { top: 2.3, bottom: 2.3, left: 1.5, right: 1.5 },
+        textColor: navy,
+        overflow: "linebreak",
+        valign: "middle",
+        lineColor: line,
+        lineWidth: 0,
+      },
+      headStyles: {
+        fontStyle: "bold",
+        fontSize: 7.5,
+        textColor: muted,
+        fillColor: [245, 246, 248],
+        cellPadding: { top: 2.6, bottom: 2.6, left: 1.5, right: 1.5 },
+      },
+      footStyles: {
+        fontStyle: "bold",
+        fontSize: 10,
+        textColor: navy,
+        fillColor: soft,
+        cellPadding: { top: 3.4, bottom: 3.4, left: 1.5, right: 1.5 },
+      },
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 40 },
+        2: { cellWidth: 34 },
+        3: { cellWidth: 36 },
+        4: { cellWidth: 24, halign: "right" },
+        5: { cellWidth: 24, halign: "right" },
+      },
+      didDrawPage: function () {
+        doc.setDrawColor(line[0], line[1], line[2]);
+        doc.setLineWidth(0.3);
+        doc.line(margin, pageH - 14, pageW - margin, pageH - 14);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(muted[0], muted[1], muted[2]);
+        doc.text("VSolutions", margin, pageH - 9);
+      },
+    });
+  } else if (!jobs.length) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text("No hay impresiones pendientes en este período.", margin, y + 8);
+    doc.setDrawColor(line[0], line[1], line[2]);
+    doc.setLineWidth(0.3);
+    doc.line(margin, pageH - 14, pageW - margin, pageH - 14);
+    doc.setFontSize(8);
+    doc.text("VSolutions", margin, pageH - 9);
+  }
+
+  let afterY = jobs.length && doc.lastAutoTable ? doc.lastAutoTable.finalY + 12 : y + 20;
+  const pagoLines = datosPago ? doc.splitTextToSize(pdfSafe(datosPago), pageW - margin * 2) : [];
+  const pagoH = datosPago ? 6 + pagoLines.length * 4.4 + 8 : 0;
+  if (afterY + pagoH + 10 > pageH - 18) {
+    doc.addPage();
+    doc.setDrawColor(line[0], line[1], line[2]);
+    doc.setLineWidth(0.3);
+    doc.line(margin, pageH - 14, pageW - margin, pageH - 14);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text("VSolutions", margin, pageH - 9);
+    afterY = 20;
+  }
+  if (datosPago) {
+    doc.setFillColor(250, 251, 252);
+    doc.setDrawColor(line[0], line[1], line[2]);
+    const boxH = 8 + pagoLines.length * 4.4;
+    doc.roundedRect(margin, afterY - 4, pageW - margin * 2, boxH, 1.5, 1.5, "FD");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text("Datos de pago", margin + 3, afterY + 1.5);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(navy[0], navy[1], navy[2]);
+    doc.text(pagoLines, margin + 3, afterY + 6.5);
+    afterY += boxH + 8;
+  }
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(9);
+  doc.setTextColor(muted[0], muted[1], muted[2]);
+  doc.text("Gracias por su preferencia", margin, afterY);
+
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text("Página " + i + " de " + totalPages, pageW - margin, pageH - 9, { align: "right" });
+  }
+  return doc.output("blob");
+}
+
+function statementHtml(st, opts) {
+  const cliente = opts.cliente || "";
+  const jobs = statementJobs(st, cliente, opts.desde, opts.hasta);
+  const total = jobs.reduce((s, j) => s + j.total, 0);
+  const period = statementPeriod(opts.desde, opts.hasta, jobs);
+  const emitido = opts.emitido || todayISO();
+  const groups = groupJobsByDate(jobs);
+  const showSub = groups.length > 1;
+  let rows = "";
+  for (const g of groups) {
+    for (const j of g.jobs) {
+      rows += "<tr>" +
+        "<td>" + esc(fmtDate(j.fecha)) + "</td>" +
+        "<td>" + esc(j.descripcion || "—") + "</td>" +
+        "<td>" + esc(matName(st.materials, j.materialId) + (j.materialCliente ? " (cliente)" : "")) + "</td>" +
+        "<td>" + esc(fmtMedidas(j)) + "</td>" +
+        '<td class="vs-num">' + esc(fmtCLP(j.precioM2)) + "</td>" +
+        '<td class="vs-num">' + esc(fmtCLP(j.total)) + "</td>" +
+        "</tr>";
+    }
+    if (showSub) {
+      const sub = g.jobs.reduce((sum, j) => sum + j.total, 0);
+      rows += '<tr class="vs-st-sub"><td colspan="5">Subtotal ' + esc(fmtDate(g.fecha)) + '</td><td class="vs-num">' + esc(fmtCLP(sub)) + "</td></tr>";
+    }
+  }
+  const pago = String(opts.datosPago || "").trim();
+  const pagoBlock = pago
+    ? '<div class="vs-st-pago"><p class="vs-st-pago-label">Datos de pago</p><p class="vs-st-pago-text">' + esc(pago) + "</p></div>"
+    : "";
+  const table = jobs.length
+    ? '<table class="vs-st-table"><thead><tr><th>Fecha</th><th>Descripción</th><th>Material</th><th>Medidas / m²</th><th class="vs-num">Precio m²</th><th class="vs-num">Valor</th></tr></thead><tbody>' + rows + '</tbody><tfoot><tr><th colspan="5">Total pendiente</th><th class="vs-num">' + esc(fmtCLP(total)) + "</th></tr></tfoot></table>"
+    : '<p class="vs-st-empty">No hay impresiones pendientes en este período.</p>';
+  return (
+    '<article class="vs-statement" id="vs-statement">' +
+      '<header class="vs-st-head">' +
+        '<div class="vs-st-brand"><span class="vs-mark">VS</span><div><strong>VSolutions</strong><small>Control de impresiones</small></div></div>' +
+        '<div class="vs-st-meta"><span>Emisión</span><strong>' + esc(fmtDate(emitido)) + "</strong></div>" +
+      "</header>" +
+      '<p class="vs-st-kicker">Estado de cuenta</p>' +
+      "<h2>Detalle de impresiones pendientes</h2>" +
+      '<div class="vs-st-info">' +
+        "<div><span>Cliente</span><strong>" + esc(cliente) + "</strong></div>" +
+        "<div><span>Período</span><strong>" + esc(period) + "</strong></div>" +
+      "</div>" +
+      table +
+      pagoBlock +
+      '<p class="vs-st-thanks">Gracias por su preferencia</p>' +
+    "</article>"
+  );
+}
+
 const api = {
-  KEY, INVENTORY_VERSION, seed, normalize, seedMaterials, seedRolls,
+  KEY, INVENTORY_VERSION, PAGO_KEY, seed, normalize, seedMaterials, seedRolls,
   matId, mid, pendingOf, deduct, restore, fmtCLP, periodProfit, jobsCsv,
+  fmtMedidas, cobroFileBase, statementJobs, statementPeriod, buildStatementPdf, statementHtml,
 };
 
 if (typeof module !== "undefined" && module.exports) {
@@ -491,6 +822,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   let filtroEstado = "todos";
   let confirmDel = "";
   let confirmPay = "";
+  let confirmCobro = false;
+  let cobroCliente = "";
+  let cobroDesde = "";
+  let cobroHasta = "";
+  let datosPago = "";
   let confirmImport = false;
   let pendingImport = null;
   let drafts = {};
@@ -889,6 +1225,200 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     );
   }
 
+  function renderCobros() {
+    const pend = pendientesMap();
+    const withPend = data.clients.filter((c) => pend[c] && pend[c].total > 0);
+    if (!cobroCliente) cobroCliente = withPend[0] || data.clients[0] || "";
+    const clientOpts = data.clients.map((c) => {
+      const p = pend[c] || { total: 0, n: 0 };
+      const label = c + (p.total > 0 ? " · " + fmtCLP(p.total) : " · al día");
+      return '<option value="' + esc(c) + '"' + (cobroCliente === c ? " selected" : "") + ">" + esc(label) + "</option>";
+    }).join("");
+    const jobs = cobroCliente ? statementJobs(data, cobroCliente, cobroDesde, cobroHasta) : [];
+    const total = jobs.reduce((sum, j) => sum + j.total, 0);
+    const disabled = jobs.length ? "" : " disabled";
+    const payLabel = confirmCobro ? "¿Confirmar cobro?" : "Marcar como cobrado/pagado";
+    const actions =
+      btn("Descargar PDF", "cobro-pdf", "primary", { attrs: disabled }) +
+      btn("Descargar imagen PNG", "cobro-png", "sec", { attrs: disabled }) +
+      btn("Compartir", "cobro-share", "sec", { attrs: disabled }) +
+      (jobs.length ? btn(payLabel, "cobro-pagar", confirmCobro ? "primary" : "sec") : "");
+    const emptyClients = !data.clients.length
+      ? '<div class="vs-empty">Agrega un cliente o importa un respaldo para armar un cobro.</div>'
+      : '<div class="vs-statement-wrap">' + statementHtml(data, { cliente: cobroCliente, desde: cobroDesde, hasta: cobroHasta, emitido: todayISO(), datosPago: datosPago }) + "</div>";
+    return (
+      '<div class="vs-stack">' +
+        '<section class="vs-card vs-card-pad">' +
+          '<div class="vs-head"><div><p class="vs-eyebrow">Estado de cuenta</p><h2>Armar un cobro</h2></div></div>' +
+          '<div class="vs-toolbar">' +
+            field("Cliente", '<select id="cobro-cliente" data-field="cobroCliente">' + (clientOpts || '<option value="">Sin clientes</option>') + "</select>") +
+            field("Desde (opcional)", '<input id="cobro-desde" type="date" data-field="cobroDesde" value="' + esc(cobroDesde) + '">') +
+            field("Hasta (opcional)", '<input id="cobro-hasta" type="date" data-field="cobroHasta" value="' + esc(cobroHasta) + '">') +
+          "</div>" +
+          '<div class="vs-actions">' + actions + "</div>" +
+          (jobs.length ? '<p class="vs-cobro-hint">' + jobs.length + (jobs.length === 1 ? " impresión pendiente" : " impresiones pendientes") + " · " + esc(fmtCLP(total)) + "</p>" : '<p class="vs-cobro-hint">Elige un cliente. Si no filtras fechas, se incluyen todos los pendientes.</p>') +
+        "</section>" +
+        '<section class="vs-card vs-card-pad">' +
+          '<div class="vs-head"><div><p class="vs-eyebrow">Datos de pago</p><h2>Qué verá el cliente</h2></div></div>' +
+          field("Texto al pie del cobro (banco, cuenta, RUT, email…)", '<textarea id="datos-pago" data-aux="datosPago" rows="4" placeholder="Ej.: Banco Estado&#10;Cuenta vista 00000000&#10;RUT 00.000.000-0&#10;Email contacto@ejemplo.cl">' + esc(datosPago) + "</textarea>") +
+          '<p class="vs-muted">Se guarda en este dispositivo. Si lo dejas vacío, el cobro solo lleva la nota de agradecimiento.</p>' +
+        "</section>" +
+        emptyClients +
+      "</div>"
+    );
+  }
+
+  function cobroOpts() {
+    return {
+      cliente: cobroCliente,
+      desde: cobroDesde,
+      hasta: cobroHasta,
+      emitido: todayISO(),
+      datosPago: datosPago,
+    };
+  }
+
+  function cobroFilename(ext) {
+    return cobroFileBase(cobroCliente, todayISO()) + "." + ext;
+  }
+
+  function downloadBlob(filename, blob) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
+  function saveDatosPago(text) {
+    datosPago = text;
+    try {
+      const st = store();
+      if (st) st.setItem(PAGO_KEY, text);
+    } catch (e) {}
+  }
+
+  function loadDatosPago() {
+    try {
+      const st = store();
+      datosPago = st ? (st.getItem(PAGO_KEY) || "") : "";
+    } catch (e) {
+      datosPago = "";
+    }
+  }
+
+  function updatePagoPreview() {
+    const stEl = document.getElementById("vs-statement");
+    if (!stEl) return;
+    const thanks = stEl.querySelector(".vs-st-thanks");
+    let box = stEl.querySelector(".vs-st-pago");
+    const text = String(datosPago || "").trim();
+    if (text) {
+      if (!box) {
+        box = document.createElement("div");
+        box.className = "vs-st-pago";
+        box.innerHTML = '<p class="vs-st-pago-label">Datos de pago</p><p class="vs-st-pago-text"></p>';
+        stEl.insertBefore(box, thanks);
+      }
+      box.querySelector(".vs-st-pago-text").textContent = datosPago;
+    } else if (box) {
+      box.remove();
+    }
+  }
+
+  async function buildStatementPng() {
+    const el = document.getElementById("vs-statement");
+    if (!el || !window.html2canvas) throw new Error("No hay vista del cobro");
+    const canvas = await window.html2canvas(el, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      logging: false,
+    });
+    return await new Promise(function (resolve, reject) {
+      canvas.toBlob(function (b) { b ? resolve(b) : reject(new Error("PNG")); }, "image/png");
+    });
+  }
+
+  async function descargarCobroPdf() {
+    const jobs = statementJobs(data, cobroCliente, cobroDesde, cobroHasta);
+    if (!jobs.length) return;
+    try {
+      const blob = buildStatementPdf(data, cobroOpts());
+      downloadBlob(cobroFilename("pdf"), blob);
+      setMsg("Descargué el PDF del cobro.");
+    } catch (err) {
+      setMsg("No pude generar el PDF.");
+    }
+  }
+
+  async function descargarCobroPng() {
+    const jobs = statementJobs(data, cobroCliente, cobroDesde, cobroHasta);
+    if (!jobs.length) return;
+    try {
+      const blob = await buildStatementPng();
+      downloadBlob(cobroFilename("png"), blob);
+      setMsg("Descargué la imagen del cobro.");
+    } catch (err) {
+      setMsg("No pude generar la imagen.");
+    }
+  }
+
+  async function compartirCobro() {
+    const jobs = statementJobs(data, cobroCliente, cobroDesde, cobroHasta);
+    if (!jobs.length) return;
+    try {
+      const blob = buildStatementPdf(data, cobroOpts());
+      const filename = cobroFilename("pdf");
+      const file = new File([blob], filename, { type: "application/pdf" });
+      const title = "Cobro " + cobroCliente;
+      const text = "Estado de cuenta de " + cobroCliente;
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: title, text: text });
+        setMsg("Listo, ya puedes enviarlo al cliente.");
+        return;
+      }
+      if (typeof navigator.share === "function") {
+        await navigator.share({ files: [file], title: title, text: text });
+        setMsg("Listo, ya puedes enviarlo al cliente.");
+        return;
+      }
+      downloadBlob(filename, blob);
+      setMsg("Este dispositivo no permite compartir el archivo. Descargué el PDF para que lo envíes tú.");
+    } catch (err) {
+      if (err && err.name === "AbortError") return;
+      try {
+        const blob = buildStatementPdf(data, cobroOpts());
+        downloadBlob(cobroFilename("pdf"), blob);
+        setMsg("No pude abrir la hoja de compartir. Descargué el PDF para que lo envíes tú.");
+      } catch (e2) {
+        setMsg("No pude compartir el cobro.");
+      }
+    }
+  }
+
+  function marcarCobroPagado() {
+    const jobs = statementJobs(data, cobroCliente, cobroDesde, cobroHasta);
+    if (!jobs.length) return;
+    if (!confirmCobro) {
+      confirmCobro = true;
+      render();
+      return;
+    }
+    const ids = {};
+    for (const j of jobs) ids[j.id] = true;
+    const suma = jobs.reduce((sum, j) => sum + j.total, 0);
+    data = Object.assign({}, data, {
+      jobs: data.jobs.map((j) => (ids[j.id] ? Object.assign({}, j, { pagado: true }) : j)),
+    });
+    persist();
+    confirmCobro = false;
+    setMsg("Marqué como pagadas las " + jobs.length + (jobs.length === 1 ? " impresión" : " impresiones") + " de este cobro (" + fmtCLP(suma) + ").");
+  }
+
   function render() {
     const root = document.getElementById("app");
     if (!root) return;
@@ -915,6 +1445,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (tab === "inicio") body = renderInicio();
     else if (tab === "nueva") body = renderNueva();
     else if (tab === "trabajos") body = renderTrabajos();
+    else if (tab === "cobros") body = renderCobros();
     else if (tab === "inventario") body = renderInventario();
     else body = renderGanancia();
 
@@ -1143,6 +1674,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (next === "nueva" && tab !== "nueva") resetForm();
       tab = next;
       if (next !== "trabajos") confirmDel = "";
+      if (next !== "cobros") confirmCobro = false;
       render();
       return;
     }
@@ -1205,6 +1737,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (act === "filtro-estado") { filtroEstado = t.getAttribute("data-val"); render(); return; }
     if (act === "add-material") { addMaterial(); return; }
     if (act === "add-roll") { addRoll(); return; }
+    if (act === "cobro-pdf") { descargarCobroPdf(); return; }
+    if (act === "cobro-png") { descargarCobroPng(); return; }
+    if (act === "cobro-share") { compartirCobro(); return; }
+    if (act === "cobro-pagar") { marcarCobroPagado(); return; }
   }
 
   function onInput(e) {
@@ -1213,6 +1749,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const key = el.dataset.field;
       if (key === "filtroCliente") {
         filtroCliente = el.value;
+        render();
+        return;
+      }
+      if (key === "cobroCliente" || key === "cobroDesde" || key === "cobroHasta") {
+        if (key === "cobroCliente") cobroCliente = el.value;
+        if (key === "cobroDesde") cobroDesde = el.value;
+        if (key === "cobroHasta") cobroHasta = el.value;
+        confirmCobro = false;
         render();
         return;
       }
@@ -1255,6 +1799,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       else if (k === "rollMat") { rollMat = el.value; render(); }
       else if (k === "rollM2") rollM2 = el.value;
       else if (k === "rollAncho") rollAncho = el.value;
+      else if (k === "datosPago") {
+        saveDatosPago(el.value);
+        updatePagoPreview();
+      }
       return;
     }
     if (el.dataset.matPrecio) {
@@ -1306,7 +1854,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function onChange(e) {
     const el = e.target;
-    if (el.dataset.field === "cliente" || el.dataset.field === "fecha" || el.dataset.field === "filtroCliente" || el.dataset.field === "materialId" || el.dataset.aux === "rollMat") {
+    if (el.dataset.field === "cliente" || el.dataset.field === "fecha" || el.dataset.field === "filtroCliente" || el.dataset.field === "materialId" || el.dataset.field === "cobroCliente" || el.dataset.field === "cobroDesde" || el.dataset.field === "cobroHasta" || el.dataset.aux === "rollMat") {
       onInput(e);
     }
     if (el.dataset.field === "materialCliente") {
@@ -1359,6 +1907,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       data = seed();
     }
     ready = true;
+    loadDatosPago();
     resetForm();
     render();
   }
@@ -1382,4 +1931,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       navigator.serviceWorker.register("./sw.js").catch(function () {});
     });
   }
+
+  window.VSOL_TEST = {
+    buildStatementPdf: buildStatementPdf,
+    cobroFileBase: cobroFileBase,
+    statementJobs: statementJobs,
+    getData: function () { return data; },
+    setData: setData,
+    setPago: function (t) { saveDatosPago(t); },
+    goTab: function (id) { tab = id; render(); },
+  };
 }
