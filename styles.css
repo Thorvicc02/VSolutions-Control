@@ -814,5 +814,104 @@ html, body {
 }
 
 @media (max-width: 760px) {
-  .vs-tabbar button { font-size: 9px; padding: 4px 1px; }
+  .vs-tabbar button { font-size: 11px; padding: 4px 2px; }
+}
+
+/* ---------- v2.0: Hoy / Trabajos / Clientes / Inventario ---------- */
+.vs-actions-top { margin: 0 0 18px; }
+.vs-bal-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  border-top: 1px solid var(--vs-border);
+  background: transparent;
+  padding: 12px 4px;
+  min-height: 56px;
+  text-align: left;
+  color: var(--vs-text);
+  font: inherit;
+  cursor: pointer;
+}
+.vs-bal-row:first-child { border-top: 0; }
+.vs-bal-row span { display: grid; gap: 4px; }
+.vs-bal-row small { color: var(--vs-muted); }
+.vs-bal-row:hover { background: var(--vs-soft); }
+
+.vs-clients {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.vs-client-card {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  border: 1px solid var(--vs-border);
+  border-radius: 16px;
+  background: var(--vs-surface);
+  padding: 16px;
+  min-height: 112px;
+  color: var(--vs-text);
+  font: inherit;
+  cursor: pointer;
+}
+.vs-client-card:hover { border-color: #c8d3e1; }
+.vs-client-name { font-weight: 700; font-size: 16px; }
+.vs-client-card small { color: var(--vs-muted); font-size: 13px; }
+.vs-client-amt { font-size: 22px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--vs-amber); }
+.vs-client-ok .vs-client-amt { color: var(--vs-green); }
+.vs-client-total { margin: 6px 0 0; font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.vs-head-wrap { flex-wrap: wrap; gap: 12px; }
+.vs-sub { display: block; color: var(--vs-muted); font-size: 12px; margin-top: 2px; }
+.vs-table tfoot th { text-align: right; padding-top: 12px; border-top: 1px solid var(--vs-border); }
+
+.vs-fold { padding: 0; }
+.vs-fold > summary {
+  list-style: none;
+  cursor: pointer;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  font-weight: 700;
+  font-size: 15px;
+}
+.vs-fold > summary::-webkit-details-marker { display: none; }
+.vs-fold > summary::after { content: "▾"; margin-left: auto; color: var(--vs-muted); transition: transform .15s; }
+.vs-fold[open] > summary::after { transform: rotate(180deg); }
+.vs-fold-body { padding: 0 20px 20px; }
+.vs-dash + .vs-fold, .vs-fold + .vs-fold { margin-top: 18px; }
+
+.vs-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(15, 23, 42, .45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.vs-sheet {
+  width: min(900px, 100%);
+  background: var(--vs-surface);
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, .25);
+}
+.vs-sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.vs-sheet-head h2 { margin: 4px 0 0; }
+.vs-sheet .vs-actions { margin-bottom: 16px; }
+
+/* Táctil (iPad): todo lo que se toca mide al menos 44 px. */
+@media (pointer: coarse) {
+  .vs-btn-danger { min-height: 44px; padding: 8px 12px; font-size: 13px; }
+  .vs-seg button { min-height: 44px; }
+  button.vs-pill { min-height: 44px; padding: 8px 12px; font-size: 12px; }
+  .vs-mat-input { min-height: 44px; }
 }

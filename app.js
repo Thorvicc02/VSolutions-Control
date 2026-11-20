@@ -23,12 +23,10 @@ const MATERIAL_SEED = [
 ];
 
 const NAV = [
-  { id: "inicio", label: "Inicio", short: "Inicio" },
-  { id: "nueva", label: "Nueva impresión", short: "Nueva" },
+  { id: "inicio", label: "Hoy", short: "Hoy" },
   { id: "trabajos", label: "Trabajos", short: "Trabajos" },
-  { id: "cobros", label: "Cobros", short: "Cobros" },
+  { id: "clientes", label: "Clientes", short: "Clientes" },
   { id: "inventario", label: "Inventario", short: "Inventario" },
-  { id: "ganancia", label: "Ganancia", short: "Ganancia" },
 ];
 
 const PAGO_KEY = "vsol-datos-pago-v1";
@@ -398,6 +396,28 @@ function pendingOf(st, name) {
   return st.jobs.filter((j) => j.cliente === name && !j.pagado).reduce((s, j) => s + j.total, 0);
 }
 
+/* Saldo por cliente: solo trabajos (impresiones) no pagados. Ordenado de mayor a menor. */
+function saldosPorCliente(st) {
+  const map = {};
+  const order = [];
+  function ensure(c) {
+    if (!map[c]) { map[c] = { cliente: c, saldo: 0, n: 0 }; order.push(c); }
+    return map[c];
+  }
+  for (const c of st.clients) ensure(c);
+  for (const j of st.jobs) {
+    if (!j.cliente) continue;
+    const row = ensure(j.cliente);
+    if (!j.pagado) {
+      row.saldo += j.total;
+      row.n += 1;
+    }
+  }
+  return order
+    .map((c) => map[c])
+    .sort((a, b) => b.saldo - a.saldo || a.cliente.localeCompare(b.cliente, "es"));
+}
+
 function download(filename, text, mime) {
   const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -440,13 +460,11 @@ function rollCapacity(r) {
   return r.mLineales > 55 ? 100 : 50;
 }
 
-function tabTitle(tab, editId) {
-  if (tab === "inicio") return "Inicio";
-  if (tab === "nueva") return editId ? "Editar impresión" : "Nueva impresión";
+function tabTitle(tab) {
+  if (tab === "inicio") return "Hoy";
   if (tab === "trabajos") return "Trabajos";
-  if (tab === "cobros") return "Cobros";
-  if (tab === "inventario") return "Inventario";
-  return "Ganancia";
+  if (tab === "clientes") return "Clientes";
+  return "Inventario";
 }
 
 function iconSvg(name, size) {
@@ -463,6 +481,9 @@ function iconSvg(name, size) {
   }
   if (name === "inventario") {
     return "<svg " + p + "><path d=\"M4 7.5 12 4l8 3.5-8 3.5L4 7.5Z\" /><path d=\"M4 12l8 3.5L20 12\" /><path d=\"M4 16.5 12 20l8-3.5\" /></svg>";
+  }
+  if (name === "clientes") {
+    return "<svg " + p + "><circle cx=\"9\" cy=\"8.5\" r=\"3.2\" /><path d=\"M3.5 19.5c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5\" /><path d=\"M15.5 5.6a3 3 0 0 1 0 5.8M17.5 14.8c1.6.6 2.7 2.2 3 4.7\" /></svg>";
   }
   if (name === "cobros") {
     return "<svg " + p + "><path d=\"M7 3.5h10a1.2 1.2 0 0 1 1.2 1.2V20l-3.1-1.4L12 20l-3.1-1.4L5.8 20V4.7A1.2 1.2 0 0 1 7 3.5Z\" /><path d=\"M9 8.5h6M9 12h6M9 15.5h3.5\" /></svg>";
@@ -771,7 +792,7 @@ function statementHtml(st, opts) {
 
 const api = {
   KEY, INVENTORY_VERSION, PAGO_KEY, seed, normalize, seedMaterials, seedRolls,
-  matId, mid, pendingOf, deduct, restore, fmtCLP, periodProfit, jobsCsv,
+  matId, mid, pendingOf, saldosPorCliente, deduct, restore, fmtCLP, periodProfit, jobsCsv,
   fmtMedidas, cobroFileBase, statementJobs, statementPeriod, buildStatementPdf, statementHtml,
 };
 
@@ -790,7 +811,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   let filtroEstado = "todos";
   let confirmDel = "";
   let confirmPay = "";
-  let confirmCobro = false;
+  let formOpen = false;
+  let clienteSel = "";
+  let cobroOpen = false;
+  let resetScroll = false;
   let cobroCliente = "";
   let cobroDesde = "";
   let cobroHasta = "";
@@ -926,35 +950,33 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function renderInicio() {
     const mesActual = todayISO().slice(0, 7);
     const jobsMes = data.jobs.filter((j) => j.fecha.slice(0, 7) === mesActual);
-    const profitMes = periodProfit(jobsMes, data.materials);
-    const pendientes = pendientesMap();
-    const totalPendiente = Object.keys(pendientes).reduce((s, k) => s + pendientes[k].total, 0);
+    const saldos = saldosPorCliente(data);
+    const conSaldo = saldos.filter((x) => x.saldo > 0);
+    const totalPendiente = conSaldo.reduce((s, x) => s + x.saldo, 0);
     const m2Mes = jobsMes.reduce((s, j) => s + j.m2, 0);
     const invM2 = data.rolls.reduce((s, r) => s + areaRollo(r), 0);
     const lowRolls = data.rolls.filter((r) => r.mLineales > 0 && r.mLineales < 10).length;
-    const recientes = data.jobs.slice().sort((a, b) => b.fecha.localeCompare(a.fecha) || b.id.localeCompare(a.id)).slice(0, 8);
+    const recientes = data.jobs.slice().sort((a, b) => b.fecha.localeCompare(a.fecha) || b.id.localeCompare(a.id)).slice(0, 5);
 
     let recHtml;
     if (recientes.length === 0) {
-      recHtml = '<div class="vs-empty">Las nuevas impresiones aparecerán aquí.</div>';
+      recHtml = '<div class="vs-empty">Los nuevos trabajos aparecerán aquí.</div>';
     } else {
       recHtml = "<div>" + recientes.map((j) => {
         return '<article class="vs-job">' +
-          '<div class="vs-job-top"><span>' + esc(fmtDate(j.fecha)) + "</span>" + pill(j.pagado, j.id) + "</div>" +
+          '<div class="vs-job-top"><span>' + esc(fmtDate(j.fecha)) + " · " + esc(j.cliente) + "</span>" + pill(j.pagado) + "</div>" +
           "<strong>" + esc(j.descripcion || matName(data.materials, j.materialId)) + "</strong>" +
-          "<span>" + esc(j.cliente) + " · " + esc(matName(data.materials, j.materialId)) + (j.materialCliente ? " · material del cliente" : "") + "</span>" +
           '<div class="vs-job-vals"><span>' + esc(fmtM2(j.m2)) + "</span><strong>" + esc(fmtCLP(j.total)) + "</strong></div>" +
           "</article>";
       }).join("") + "</div>";
     }
 
     let balHtml;
-    if (!data.clients.length) {
-      balHtml = '<div class="vs-empty">Aún no hay clientes. Importa un respaldo o agrega uno al registrar una impresión.</div>';
+    if (!conSaldo.length) {
+      balHtml = '<div class="vs-empty">' + (data.clients.length ? "Todos los clientes están al día." : "Aún no hay clientes. Importa un respaldo o agrega uno al registrar un trabajo.") + "</div>";
     } else {
-      balHtml = '<div class="vs-bal">' + data.clients.map((c) => {
-        const p = pendientes[c] || { total: 0, n: 0 };
-        return "<div><span><strong>" + esc(c) + "</strong><small>" + (p.total > 0 ? "Saldo pendiente" : "Al día") + '</small></span><strong class="vs-amt">' + esc(fmtCLP(p.total)) + "</strong></div>";
+      balHtml = '<div class="vs-bal">' + conSaldo.slice(0, 6).map((x) => {
+        return '<button type="button" class="vs-bal-row" data-act="ver-cliente" data-cli="' + esc(x.cliente) + '"><span><strong>' + esc(x.cliente) + "</strong><small>" + x.n + (x.n === 1 ? " trabajo pendiente" : " trabajos pendientes") + '</small></span><strong class="vs-amt">' + esc(fmtCLP(x.saldo)) + "</strong></button>";
       }).join("") + "</div>";
     }
 
@@ -965,19 +987,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return (
       '<section class="vs-metrics">' +
         '<button type="button" class="vs-kpi" data-act="tab" data-tab="trabajos"><span>Trabajos del mes</span><strong>' + jobsMes.length + " trabajos</strong><small>" + esc(fmtM2(m2Mes)) + "</small></button>" +
-        '<button type="button" class="vs-kpi" data-act="tab" data-tab="ganancia"><span>Venta del mes</span><strong>' + esc(fmtCLP(profitMes.venta)) + "</strong><small>" + esc(fmtCLP(totalPendiente)) + " pendiente total</small></button>" +
+        '<button type="button" class="vs-kpi" data-act="tab" data-tab="clientes"><span>Por cobrar</span><strong>' + esc(fmtCLP(totalPendiente)) + "</strong><small>" + conSaldo.length + (conSaldo.length === 1 ? " cliente" : " clientes") + " con saldo</small></button>" +
         '<button type="button" class="vs-kpi" data-act="tab" data-tab="inventario"><span>Inventario disponible</span><strong>' + esc(fmtM2(invM2)) + "</strong><small>" + (lowRolls ? lowRolls + " rollos con nivel bajo" : data.rolls.length + " rollos") + "</small></button>" +
       "</section>" +
+      '<div class="vs-actions vs-actions-top">' + btn("+ Nuevo trabajo", "nueva", "primary") + "</div>" +
       '<div class="vs-dash">' +
-        '<section class="vs-card vs-card-pad"><div class="vs-head"><div><p class="vs-eyebrow">Recientes</p><h2>Trabajos recientes</h2></div><span class="vs-count">' + recientes.length + "</span></div>" + recHtml + "</section>" +
-        '<section class="vs-card vs-card-pad"><div class="vs-head"><div><p class="vs-eyebrow">Por cobrar</p><h2>Saldos por cliente</h2></div></div>' + balHtml + btn("Ver trabajos", "tab", "sec", { block: true, attrs: 'data-tab="trabajos"' }) + "</section>" +
+        '<section class="vs-card vs-card-pad"><div class="vs-head"><div><p class="vs-eyebrow">Por cobrar</p><h2>Saldos por cliente</h2></div></div>' + balHtml + btn("Ver clientes", "tab", "sec", { block: true, attrs: 'data-tab="clientes"' }) + "</section>" +
+        '<section class="vs-card vs-card-pad"><div class="vs-head"><div><p class="vs-eyebrow">Recientes</p><h2>Últimos trabajos</h2></div></div>' + recHtml + btn("Ver trabajos", "tab", "sec", { block: true, attrs: 'data-tab="trabajos"' }) + "</section>" +
       "</div>" +
-      '<div class="vs-actions">' +
-        btn("+ Registrar impresión", "nueva", "primary") +
-        btn("Exportar JSON", "export-json", "sec") +
-        btn("Exportar CSV", "export-csv", "sec") +
-        importBtns +
-      "</div>" +
+      '<details class="vs-fold vs-card"><summary>Ganancia por mes</summary><div class="vs-fold-body">' + renderGanancia() + "</div></details>" +
+      '<details class="vs-fold vs-card"' + (confirmImport ? " open" : "") + '><summary>Respaldo de datos</summary><div class="vs-fold-body">' +
+        '<p class="vs-note" style="margin-top:0">Los datos viven solo en este iPad. Descarga un respaldo JSON de vez en cuando.</p>' +
+        '<div class="vs-actions">' + btn("Exportar JSON", "export-json", "sec") + btn("Exportar CSV", "export-csv", "sec") + importBtns + "</div>" +
+      "</div></details>" +
       (data.note ? '<p class="vs-note">' + esc(data.note) + "</p>" : "")
     );
   }
@@ -1002,9 +1024,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       : field("m²", '<input id="f-m2" data-field="m2Directo" value="' + esc(form.m2Directo) + '" inputmode="decimal" placeholder="3,625">');
 
     return (
-      '<section class="vs-card vs-card-pad">' +
-        '<div class="vs-head"><div><p class="vs-eyebrow">Ingreso manual</p><h2>' + (form.editId ? "Editar trabajo recibido" : "Registrar trabajo recibido") + "</h2></div>" +
-        (form.editId ? btn("Cancelar edición", "cancel-edit", "sec") : "") +
+      '<section class="vs-card vs-card-pad vs-form-panel" id="vs-form-panel">' +
+        '<div class="vs-head"><div><p class="vs-eyebrow">' + (form.editId ? "Editar" : "Nuevo trabajo") + "</p><h2>" + (form.editId ? "Editar trabajo" : "Registrar trabajo recibido") + "</h2></div>" +
+        btn(form.editId ? "Cancelar edición" : "Cerrar", "cancel-edit", "sec") +
         "</div>" +
         '<div class="vs-form">' +
           '<div class="vs-grid-2">' +
@@ -1032,7 +1054,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
             field("Total", '<input id="f-total" data-field="totalStr" data-lock="1" value="' + esc(form.totalStr) + '" inputmode="decimal">') +
           "</div>" +
           '<label class="vs-check"><input id="f-cli-mat" type="checkbox" data-field="materialCliente"' + (form.materialCliente ? " checked" : "") + "> Material del cliente (no descontar del inventario)</label>" +
-          '<div class="vs-actions" style="margin-top:8px">' + btn(form.editId ? "Guardar cambios" : "Guardar impresión", "guardar", "primary") + "</div>" +
+          '<div class="vs-actions" style="margin-top:8px">' + btn(form.editId ? "Guardar cambios" : "Guardar trabajo", "guardar", "primary") + "</div>" +
         "</div>" +
       "</section>"
     );
@@ -1084,9 +1106,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
     return (
       '<div class="vs-stack">' +
+        (formOpen ? renderNueva() : "") +
         '<section class="vs-card vs-card-pad">' +
           '<div class="vs-head"><div><p class="vs-eyebrow">Listado</p><h2>' + filtrados.length + " en esta vista</h2></div>" +
-          btn("+ Registrar impresión", "nueva", "primary") +
+          (formOpen ? "" : btn("+ Nuevo trabajo", "nueva", "primary")) +
           "</div>" +
           '<div class="vs-toolbar">' +
             field("Cliente", '<select id="filtro-cliente" data-field="filtroCliente">' + clientOpts + "</select>") +
@@ -1184,8 +1207,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       ? '<p class="vs-note">' + esc(data.note) + ". Ese historial no entra en las cifras de arriba porque no está desglosado por mes en la app.</p>"
       : "";
     return (
-      '<section class="vs-card vs-card-pad">' +
-        '<div class="vs-head"><div><p class="vs-eyebrow">Resultado</p><h2>Ganancia por mes</h2></div></div>' +
+      '<section>' +
         '<p class="vs-note" style="margin-top:0;margin-bottom:16px">La ganancia estimada aparece cuando todos los materiales usados en el mes tienen su costo por m². El material del cliente cuenta como costo 0.</p>' +
         '<div class="vs-table-wrap"><table class="vs-table"><thead><tr><th>Mes</th><th class="vs-num">Venta</th><th class="vs-num">Costo material</th><th class="vs-num">Ganancia estimada</th><th class="vs-num">m²</th></tr></thead><tbody>' + (rows || empty) + "</tbody></table></div>" +
         note +
@@ -1193,45 +1215,86 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     );
   }
 
-  function renderCobros() {
-    const pend = pendientesMap();
-    const withPend = data.clients.filter((c) => pend[c] && pend[c].total > 0);
-    if (!cobroCliente) cobroCliente = withPend[0] || data.clients[0] || "";
-    const clientOpts = data.clients.map((c) => {
-      const p = pend[c] || { total: 0, n: 0 };
-      const label = c + (p.total > 0 ? " · " + fmtCLP(p.total) : " · al día");
-      return '<option value="' + esc(c) + '"' + (cobroCliente === c ? " selected" : "") + ">" + esc(label) + "</option>";
-    }).join("");
-    const jobs = cobroCliente ? statementJobs(data, cobroCliente, cobroDesde, cobroHasta) : [];
-    const total = jobs.reduce((sum, j) => sum + j.total, 0);
-    const disabled = jobs.length ? "" : " disabled";
-    const payLabel = confirmCobro ? "¿Confirmar cobro?" : "Marcar como cobrado/pagado";
-    const actions =
-      btn("Descargar PDF", "cobro-pdf", "primary", { attrs: disabled }) +
-      btn("Descargar imagen PNG", "cobro-png", "sec", { attrs: disabled }) +
-      btn("Compartir", "cobro-share", "sec", { attrs: disabled }) +
-      (jobs.length ? btn(payLabel, "cobro-pagar", confirmCobro ? "primary" : "sec") : "");
-    const emptyClients = !data.clients.length
-      ? '<div class="vs-empty">Agrega un cliente o importa un respaldo para armar un cobro.</div>'
-      : '<div class="vs-statement-wrap">' + statementHtml(data, { cliente: cobroCliente, desde: cobroDesde, hasta: cobroHasta, emitido: todayISO(), datosPago: datosPago }) + "</div>";
+  function renderClientes() {
+    if (clienteSel && data.clients.indexOf(clienteSel) === -1 && !data.jobs.some((j) => j.cliente === clienteSel)) clienteSel = "";
+    if (clienteSel) return renderClienteDetalle(clienteSel);
+    const saldos = saldosPorCliente(data);
+    const total = saldos.reduce((s, x) => s + x.saldo, 0);
+    const cards = saldos.length
+      ? '<div class="vs-clients">' + saldos.map((x) => {
+          const al = x.saldo <= 0;
+          return '<button type="button" class="vs-client-card' + (al ? " vs-client-ok" : "") + '" data-act="ver-cliente" data-cli="' + esc(x.cliente) + '">' +
+            '<span class="vs-client-name">' + esc(x.cliente) + "</span>" +
+            "<small>" + (al ? "Al día" : x.n + (x.n === 1 ? " trabajo pendiente" : " trabajos pendientes")) + "</small>" +
+            '<strong class="vs-client-amt">' + esc(fmtCLP(x.saldo)) + "</strong>" +
+            "</button>";
+        }).join("") + "</div>"
+      : '<div class="vs-empty">Aún no hay clientes. Se agregan al registrar un trabajo.</div>';
     return (
       '<div class="vs-stack">' +
         '<section class="vs-card vs-card-pad">' +
-          '<div class="vs-head"><div><p class="vs-eyebrow">Estado de cuenta</p><h2>Armar un cobro</h2></div></div>' +
-          '<div class="vs-toolbar">' +
-            field("Cliente", '<select id="cobro-cliente" data-field="cobroCliente">' + (clientOpts || '<option value="">Sin clientes</option>') + "</select>") +
-            field("Desde (opcional)", '<input id="cobro-desde" type="date" data-field="cobroDesde" value="' + esc(cobroDesde) + '">') +
-            field("Hasta (opcional)", '<input id="cobro-hasta" type="date" data-field="cobroHasta" value="' + esc(cobroHasta) + '">') +
-          "</div>" +
-          '<div class="vs-actions">' + actions + "</div>" +
-          (jobs.length ? '<p class="vs-cobro-hint">' + jobs.length + (jobs.length === 1 ? " impresión pendiente" : " impresiones pendientes") + " · " + esc(fmtCLP(total)) + "</p>" : '<p class="vs-cobro-hint">Elige un cliente. Si no filtras fechas, se incluyen todos los pendientes.</p>') +
+          '<div class="vs-head"><div><p class="vs-eyebrow">Saldo pendiente total</p><h2>' + esc(fmtCLP(total)) + "</h2></div></div>" +
+          '<p class="vs-note" style="margin-top:0">Toca un cliente para ver sus trabajos pendientes y generar el cobro. El saldo suma solo trabajos de impresión sin pagar.</p>' +
         "</section>" +
-        '<section class="vs-card vs-card-pad">' +
-          '<div class="vs-head"><div><p class="vs-eyebrow">Datos de pago</p><h2>Qué verá el cliente</h2></div></div>' +
+        cards +
+        '<details class="vs-fold vs-card"><summary>Datos de pago (pie del cobro)</summary><div class="vs-fold-body">' +
           field("Texto al pie del cobro (banco, cuenta, RUT, email…)", '<textarea id="datos-pago" data-aux="datosPago" rows="4" placeholder="Ej.: Banco Estado&#10;Cuenta vista 00000000&#10;RUT 00.000.000-0&#10;Email contacto@ejemplo.cl">' + esc(datosPago) + "</textarea>") +
           '<p class="vs-muted">Se guarda en este dispositivo. Si lo dejas vacío, el cobro solo lleva la nota de agradecimiento.</p>' +
+        "</div></details>" +
+      "</div>"
+    );
+  }
+
+  function renderClienteDetalle(cli) {
+    const pend = statementJobs(data, cli, "", "");
+    const total = pend.reduce((s, j) => s + j.total, 0);
+    const pagados = data.jobs
+      .filter((j) => j.cliente === cli && j.pagado)
+      .slice()
+      .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.id.localeCompare(a.id));
+    const rows = pend.map((j) => {
+      return "<tr><td>" + esc(fmtDate(j.fecha)) + "</td><td>" + esc(j.descripcion || matName(data.materials, j.materialId)) + '<small class="vs-sub">' + esc(matName(data.materials, j.materialId) + (j.materialCliente ? " (cliente)" : "")) + "</small></td><td>" + esc(fmtMedidas(j)) + '</td><td class="vs-num">' + esc(fmtCLP(j.total)) + "</td></tr>";
+    }).join("");
+    const table = pend.length
+      ? '<div class="vs-table-wrap"><table class="vs-table"><thead><tr><th>Fecha</th><th>Descripción</th><th>Medidas / m²</th><th class="vs-num">Pendiente</th></tr></thead><tbody>' + rows + '</tbody><tfoot><tr><th colspan="3">Total pendiente</th><th class="vs-num">' + esc(fmtCLP(total)) + "</th></tr></tfoot></table></div>"
+      : '<div class="vs-empty">Este cliente está al día.</div>';
+    const histRows = pagados.map((j) => {
+      return "<tr><td>" + esc(fmtDate(j.fecha)) + "</td><td>" + esc(j.descripcion || matName(data.materials, j.materialId)) + "</td><td>" + esc(fmtMedidas(j)) + '</td><td class="vs-num">' + esc(fmtCLP(j.total)) + "</td></tr>";
+    }).join("");
+    const hist = '<details class="vs-fold vs-card"><summary>Historial pagado (' + pagados.length + ')</summary><div class="vs-fold-body">' +
+      (pagados.length
+        ? '<div class="vs-table-wrap"><table class="vs-table"><thead><tr><th>Fecha</th><th>Descripción</th><th>Medidas / m²</th><th class="vs-num">Valor</th></tr></thead><tbody>' + histRows + "</tbody></table></div>"
+        : '<p class="vs-muted">Todavía no hay trabajos pagados de este cliente.</p>') +
+      "</div></details>";
+    return (
+      '<div class="vs-stack">' +
+        "<div>" + btn("← Clientes", "volver-clientes", "sec") + "</div>" +
+        '<section class="vs-card vs-card-pad">' +
+          '<div class="vs-head vs-head-wrap"><div><p class="vs-eyebrow">' + (pend.length ? pend.length + (pend.length === 1 ? " trabajo pendiente" : " trabajos pendientes") : "Al día") + "</p><h2>" + esc(cli) + '</h2><p class="vs-client-total">' + esc(fmtCLP(total)) + "</p></div>" +
+            btn("Generar cobro", "generar-cobro", "primary", { attrs: 'data-cli="' + esc(cli) + '"' + (pend.length ? "" : " disabled") }) +
+          "</div>" +
+          table +
         "</section>" +
-        emptyClients +
+        hist +
+      "</div>"
+    );
+  }
+
+  function renderCobroSheet() {
+    if (!cobroOpen || !cobroCliente) return "";
+    const jobs = statementJobs(data, cobroCliente, "", "");
+    const total = jobs.reduce((s, j) => s + j.total, 0);
+    return (
+      '<div class="vs-sheet-backdrop" role="dialog" aria-modal="true" aria-label="Cobro">' +
+        '<div class="vs-sheet">' +
+          '<div class="vs-sheet-head"><div><p class="vs-eyebrow">Cobro · ' + jobs.length + (jobs.length === 1 ? " línea" : " líneas") + "</p><h2>" + esc(cobroCliente) + " · " + esc(fmtCLP(total)) + "</h2></div>" + btn("Cerrar", "cerrar-cobro", "sec") + "</div>" +
+          '<div class="vs-actions">' +
+            btn("Descargar PDF", "cobro-pdf", "primary") +
+            btn("Compartir", "cobro-share", "sec") +
+            btn("Imagen PNG", "cobro-png", "sec") +
+          "</div>" +
+          '<div class="vs-statement-wrap">' + statementHtml(data, cobroOpts()) + "</div>" +
+        "</div>" +
       "</div>"
     );
   }
@@ -1368,25 +1431,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
   }
 
-  function marcarCobroPagado() {
-    const jobs = statementJobs(data, cobroCliente, cobroDesde, cobroHasta);
-    if (!jobs.length) return;
-    if (!confirmCobro) {
-      confirmCobro = true;
-      render();
-      return;
-    }
-    const ids = {};
-    for (const j of jobs) ids[j.id] = true;
-    const suma = jobs.reduce((sum, j) => sum + j.total, 0);
-    data = Object.assign({}, data, {
-      jobs: data.jobs.map((j) => (ids[j.id] ? Object.assign({}, j, { pagado: true }) : j)),
-    });
-    persist();
-    confirmCobro = false;
-    setMsg("Marqué como pagadas las " + jobs.length + (jobs.length === 1 ? " impresión" : " impresiones") + " de este cobro (" + fmtCLP(suma) + ").");
-  }
-
   function render() {
     const root = document.getElementById("app");
     if (!root) return;
@@ -1410,12 +1454,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     ).join("");
 
     let body = "";
-    if (tab === "inicio") body = renderInicio();
-    else if (tab === "nueva") body = renderNueva();
-    else if (tab === "trabajos") body = renderTrabajos();
-    else if (tab === "cobros") body = renderCobros();
+    if (tab === "trabajos") body = renderTrabajos();
+    else if (tab === "clientes") body = renderClientes();
     else if (tab === "inventario") body = renderInventario();
-    else body = renderGanancia();
+    else body = renderInicio();
 
     root.innerHTML =
       '<div class="vs-app">' +
@@ -1425,15 +1467,17 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           '<div class="vs-side-foot"><span class="vs-avatar">VS</span><span><strong>Administrador</strong><small>Este dispositivo</small></span></div>' +
         "</aside>" +
         '<main class="vs-main">' +
-          '<header class="vs-topbar"><div><p class="vs-eyebrow">' + esc(fmtLongDate()) + "</p><h1>" + esc(tabTitle(tab, form.editId)) + '</h1></div><div class="vs-chip"><span class="vs-dot"></span>Guardado en este dispositivo</div></header>' +
+          '<header class="vs-topbar"><div><p class="vs-eyebrow">' + esc(fmtLongDate()) + "</p><h1>" + esc(tabTitle(tab)) + '</h1></div><div class="vs-chip"><span class="vs-dot"></span>Guardado en este dispositivo</div></header>' +
           alertsHtml() +
           body +
         "</main>" +
         '<nav class="vs-tabbar" aria-label="Navegación">' + tabBtns + "</nav>" +
+        renderCobroSheet() +
       "</div>";
 
     const main2 = root.querySelector(".vs-main");
-    if (main2) main2.scrollTop = scrollTop;
+    if (main2) main2.scrollTop = resetScroll ? 0 : scrollTop;
+    resetScroll = false;
     if (focusId) {
       const el = document.getElementById(focusId);
       if (el && typeof el.focus === "function") {
@@ -1480,7 +1524,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     form.totalStr = String(j.total);
     form.totalLocked = true;
     form.materialCliente = j.materialCliente;
-    tab = "nueva";
+    tab = "trabajos";
+    formOpen = true;
+    resetScroll = true;
     msg = "";
     render();
   }
@@ -1546,6 +1592,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     persist();
     resetForm();
     tab = "trabajos";
+    formOpen = false;
     filtroCliente = cli;
     msg = warnInv
       ? "Guardado sin descontar inventario: no hay un rollo de este material. Puedes agregarlo en Inventario."
@@ -1639,16 +1686,47 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const act = t.getAttribute("data-act");
     if (act === "tab") {
       const next = t.getAttribute("data-tab");
-      if (next === "nueva" && tab !== "nueva") resetForm();
+      if (next === "clientes") clienteSel = "";
       tab = next;
       if (next !== "trabajos") confirmDel = "";
-      if (next !== "cobros") confirmCobro = false;
+      cobroOpen = false;
+      resetScroll = true;
       render();
       return;
     }
     if (act === "nueva") {
       resetForm();
-      tab = "nueva";
+      tab = "trabajos";
+      formOpen = true;
+      resetScroll = true;
+      msg = "";
+      render();
+      return;
+    }
+    if (act === "ver-cliente") {
+      clienteSel = t.getAttribute("data-cli") || "";
+      tab = "clientes";
+      cobroOpen = false;
+      resetScroll = true;
+      render();
+      return;
+    }
+    if (act === "volver-clientes") {
+      clienteSel = "";
+      cobroOpen = false;
+      render();
+      return;
+    }
+    if (act === "generar-cobro") {
+      cobroCliente = t.getAttribute("data-cli") || clienteSel;
+      cobroDesde = "";
+      cobroHasta = "";
+      cobroOpen = !!cobroCliente && statementJobs(data, cobroCliente, "", "").length > 0;
+      render();
+      return;
+    }
+    if (act === "cerrar-cobro") {
+      cobroOpen = false;
       render();
       return;
     }
@@ -1685,7 +1763,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       return;
     }
     if (act === "add-client") { agregarCliente(); return; }
-    if (act === "cancel-edit") { resetForm(); render(); return; }
+    if (act === "cancel-edit") { resetForm(); formOpen = false; render(); return; }
     if (act === "modo") {
       form.modo = t.getAttribute("data-modo");
       form.totalLocked = false;
@@ -1708,7 +1786,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (act === "cobro-pdf") { descargarCobroPdf(); return; }
     if (act === "cobro-png") { descargarCobroPng(); return; }
     if (act === "cobro-share") { compartirCobro(); return; }
-    if (act === "cobro-pagar") { marcarCobroPagado(); return; }
   }
 
   function onInput(e) {
@@ -1724,7 +1801,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         if (key === "cobroCliente") cobroCliente = el.value;
         if (key === "cobroDesde") cobroDesde = el.value;
         if (key === "cobroHasta") cobroHasta = el.value;
-        confirmCobro = false;
         render();
         return;
       }
